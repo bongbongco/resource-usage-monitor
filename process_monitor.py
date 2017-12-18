@@ -14,7 +14,18 @@ class ReportManager:
         self.DatabaseManager = DatabaseManager()
 
     def create_csv(self):
-        pass
+        cell = ""
+
+        all_data = self.DatabaseManager.get_all_data()
+        csv_file = open("process_{}.csv".format(time.strftime("%Y-%m-%d")), 'a')
+        
+        for row in all_data:
+            for index in range(1,11):
+                cell = cell + str(row[index])+','
+            cell = cell + '\n'
+            csv_file.write(cell)
+            cell = ""
+        csv_file.close()
 
     def create_graph(self):
         pass

@@ -10,12 +10,15 @@ import xlsxwriter
 
 collect_data = []
 thread_count = 0
+export_path = ""
 
 
-class ReportManager:
-    def __init__(self, export_path):
+class DocumentManager:
+    def __init__(self):
+        global export_path
         self.export_path = export_path
-        self.DatabaseManager = DatabaseManager(self.export_path)
+        self.AnalysisManager = AnalysisManager()
+
         self.workbook = None 
         self.worksheet = None
       
@@ -28,14 +31,25 @@ class ReportManager:
         self.index = 0
         self.column = 'A'
         self.width = 5
-        self.items = None
+        self.items = []
     
         self.time = time.strftime("%Y-%m-%d")
-
+        
     def create_csv(self):
-        cell = "name,cpu_percent,cpu_user_times,cpu_system_times,memory,read_count,write_count,read_bytes,write_bytes,loop,monitor_time,timestamp(UTC)\n"
+        cell = "name,\
+        cpu_percent,\
+        cpu_user_times,\
+        cpu_system_times,\
+        memory,\
+        read_count,\
+        write_count,\
+        read_bytes,\
+        write_bytes,\
+        loop,\
+        monitor_time,\
+        timestamp(UTC)\n"
 
-        all_data = self.DatabaseManager.get_all_data()
+        all_data = self.AnalysisManager.get_all_data()
         csv_file = open("{}\\process_{}.csv".format(self.export_path, self.time), 'a')
         
         for row in all_data:
@@ -60,7 +74,7 @@ class ReportManager:
 
         self.get_memory_rank()
         self.set_memory_rank()
-
+        
         self.get_read_rank()
         self.set_read_rank()
 
@@ -119,7 +133,7 @@ class ReportManager:
         self.write_data()
 
     def get_cpu_percent_rank(self):
-        self.items = self.DatabaseManager.get_cpu_percent_rank()
+        self.items = self.AnalysisManager.get_cpu_percent_rank()
 
     def set_memory_rank(self):
         self.index = 3
@@ -129,7 +143,7 @@ class ReportManager:
         self.write_data()
 
     def get_memory_rank(self):
-        self.items = self.DatabaseManager.get_memory_rank()
+        self.items = self.AnalysisManager.get_memory_rank()
 
     def set_read_rank(self):
         self.index = 3
@@ -139,7 +153,7 @@ class ReportManager:
         self.write_data()
 
     def get_read_rank(self):
-        self.items = self.DatabaseManager.get_read_count_rank()
+        self.items = self.AnalysisManager.get_read_count_rank()
 
     def set_write_rank(self):
         self.index = 3
@@ -149,7 +163,7 @@ class ReportManager:
         self.write_data()
 
     def get_write_rank(self):
-        self.items = self.DatabaseManager.get_write_count_rank()
+        self.items = self.AnalysisManager.get_write_count_rank()
 
     def write_data(self):
         self.worksheet.set_column('{0}:{0}'.format(self.column), self.width)
@@ -175,12 +189,82 @@ class SingletonInstane:
     return cls.__instancee
 
 
-class DatabaseManager(SingletonInstane):
-    def __init__(self, export_path):
+class AnalysisManager(SingletonInstane):
+    def __init__(self):
+        global export_path
         self.export_path = export_path
+        self.dump_name = "{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d"))
         self.database_name = "{}\\process_{}.db".format(self.export_path, time.strftime("%Y-%m-%d"))
+
         self.connect = None
         self.cursor = None
+        self.ready_to_dump = False
+
+    def _connect_process_data(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self.connect = sqlite3.connect("{}".format(self.database_name), isolation_level = None)
+            self.cursor = self.connect.cursor()
+            return func(self, *args, **kwargs)
+        return wrapper
+    
+    def _check_database(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if os.path.exists(self.dump_name):
+                self.ready_to_dump = True
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    def execute(self, sql):
+        self.cursor.execute(sql)
+        rows = self.cursor.fetchall()
+        self.connect.commit()
+        self.connect.close()
+        return rows
+
+    @_check_database
+    @_connect_process_data
+    def create_database(self):
+        if self.ready_to_dump:
+            dump_file = open("{}".format(self.dump_name), 'r')
+            sql = dump_file.read()
+            self.connect.executescript(sql)
+            self.connect.close()
+
+    @_connect_process_data
+    def get_write_count_rank(self):
+        sql = "select distinct name from process order by write_count DESC Limit 15;"
+        return self.execute(sql)
+
+    @_connect_process_data
+    def get_read_count_rank(self):
+        sql = "select distinct name from process order by read_count DESC Limit 15;"
+        return self.execute(sql)
+
+    @_connect_process_data
+    def get_cpu_percent_rank(self):
+        sql = "select distinct name from process order by cpu_percent DESC Limit 15;"
+        return self.execute(sql)
+
+    @_connect_process_data
+    def get_memory_rank(self):
+        sql = "select distinct name from process order by memory DESC Limit 15;"
+        return self.execute(sql)
+
+    @_connect_process_data
+    def get_all_data(self):
+        sql = "select * from process"
+        return self.execute(sql)
+
+
+class CollectManager(SingletonInstane):
+    def __init__(self):
+        global export_path
+        self.export_path = export_path
+        self.dump_name = "{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d"))
+        self.connect = sqlite3.connect("{}".format(":memory:"), check_same_thread = False)
+        self.cursor = self.connect.cursor()
 
         self.name = None
         self.cpu_percent = None
@@ -194,42 +278,8 @@ class DatabaseManager(SingletonInstane):
         self.loop = None
         self.monitor_time = None
 
-        self.checked_database()
-
-    def checked_database(self):
-        if not os.path.exists(self.database_name):
-            self.create_database()
-            self.create_table()
-
-    def _connect_process_data(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            self.connect = sqlite3.connect("{}".format(self.database_name), isolation_level = None)
-            self.cursor = self.connect.cursor()
-            return func(self, *args, **kwargs)
-        return wrapper
-
-    def _close_process_data(self):
-        self.connect.commit()
-        self.connect.close()
-
-    @_connect_process_data
-    def execute(self, sql, mode):
-        self.cursor.execute(sql)
-        if mode == "get":
-            rows = self.cursor.fetchall()
-            self._close_process_data()
-            return rows
-
-        elif mode == "set":
-            self._close_process_data()
+        self.create_table()
     
-    @_connect_process_data
-    def create_database(self):
-        print "Ready to monitoring process"
-        self._close_process_data()
-
-    @_connect_process_data
     def create_table(self):
         sql = "create table if not exists process (\
         id integer PRIMARY KEY,\
@@ -246,7 +296,7 @@ class DatabaseManager(SingletonInstane):
         monitor_time text NOT NULL,\
         Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP\
         );"
-        self.execute(sql, "set")
+        self.cursor.execute(sql)
 
     def set_process_data(self):
         sql = "insert into process (name,\
@@ -259,7 +309,17 @@ class DatabaseManager(SingletonInstane):
         read_bytes,\
         write_bytes,\
         loop,\
-        monitor_time) values ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')".format(
+        monitor_time) values ('{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}',\
+        '{}')".format(
                 self.name,
                 self.cpu_percent,
                 self.cpu_user_times,
@@ -271,27 +331,8 @@ class DatabaseManager(SingletonInstane):
                 self.write_bytes,
                 self.loop,
                 self.monitor_time)
-        self.execute(sql,"set")
-
-    def get_write_count_rank(self):
-        sql = "select distinct name from process order by write_count DESC Limit 15;"
-        return self.execute(sql, "get")
-
-    def get_read_count_rank(self):
-        sql = "select distinct name from process order by read_count DESC Limit 15;"
-        return self.execute(sql, "get")
-
-    def get_cpu_percent_rank(self):
-        sql = "select distinct name from process order by cpu_percent DESC Limit 15;"
-        return self.execute(sql, "get")
-
-    def get_memory_rank(self):
-        sql = "select distinct name from process order by memory DESC Limit 15;"
-        return self.execute(sql, "get")
-
-    def get_all_data(self):
-        sql = "select * from process"
-        return self.execute(sql, "get")
+       
+        self.cursor.execute(sql)
 
     def classify(self, unstructured_data):
         self.name = unstructured_data["name"]
@@ -305,6 +346,12 @@ class DatabaseManager(SingletonInstane):
         self.write_bytes = unstructured_data["write_bytes"]
         self.loop = unstructured_data["loop"]
         self.monitor_time = unstructured_data["monitor_time"]
+
+    def dump(self):
+        with open("{}".format(self.dump_name), 'w') as f:
+            for line in self.connect.iterdump():
+                f.write('%s\n' % line)
+        self.connect.close()
 
     def working(self, data):
         for unstructured_row in data:
@@ -327,16 +374,40 @@ class ProcessManager:
         self.name = self.process.name()
 
     def get_cpu_percent(self):
-        self.cpu_percent = self.process.cpu_percent(interval=0.1)
+        global thread_count
+
+        try:
+            self.cpu_percent = self.process.cpu_percent(interval=0.1)
+        except psutil.NoSuchProcess:
+            print "terminated target process"
+            thread_count = thread_count + 1
 
     def get_cpu_times(self):
-        self.cpu_times = self.process.cpu_times()
+        global thread_count
+
+        try:
+            self.cpu_times = self.process.cpu_times()
+        except psutil.NoSuchProcess:
+            print "terminated target process"
+            thread_count = thread_count + 1 
 
     def get_memory(self):
-        self.memory = self.process.memory_percent()
+        global thread_count
+
+        try:
+            self.memory = self.process.memory_percent()
+        except psutil.NoSuchProcess:
+            print "terminated target process"
+            thread_count = thread_count + 1
 
     def get_disk_io(self):
-        self.io = self.process.io_counters()
+        global thread_count
+
+        try:
+            self.io = self.process.io_counters()
+        except psutil.NosuchProcess:
+            print "terminated target process"
+            thread_count = thread_count + 1
 
     def get_summary(self):
         return {"name":self.name,
@@ -360,7 +431,11 @@ class ProcessManager:
 
 
 class Secretary:
-    def __init__(self, export_path, interval, limit_time, debug, report, csv):
+    def __init__(self, export_path_, interval, limit_time, debug, report, csv):
+        global export_path
+        export_path = export_path_
+        self.export_path = export_path_
+        
         self.target = None
         self.targets = None
         self.ProcessManager = None
@@ -375,11 +450,13 @@ class Secretary:
         self.target_count = 0
         self.debug_mode = debug
         
-        self.DatabaseManager = DatabaseManager(export_path)
+        self.CollectManager = CollectManager()
        
-        self.ReportManager = ReportManager(export_path)
+        self.DocumentManager = DocumentManager()
         self.report = report
         self.csv = csv
+
+        self.AnalysisManager = AnalysisManager()
 
     def _check_times(func):
         @wraps(func)
@@ -392,6 +469,12 @@ class Secretary:
                 else:
                     time.sleep(0.2)
         return wrapper
+
+    def checked_limit_time(self):
+        if time.time() - self.start_time >= self.limit_time:
+            return True 
+        else:
+            return False
 
     def get_processes(self):
         self.targets = psutil.pids()
@@ -410,32 +493,33 @@ class Secretary:
         thread_count = thread_count + 1 
         self.lock.release()
 
-    def set_process_data(self):
-        self.DatabaseManager.working(self.process_data)
+    def save_monitor_data(self):
+        self.CollectManager.working(self.process_data)
 
-    def get_work_thread(self):
-        get_data_thread = threading.Thread(target=self.get_process_data)
-        get_data_thread.setDaemon(0)
-        get_data_thread.start()
+    def monitor_work(self):
+        monitor_thread = threading.Thread(target=self.get_process_data)
+        monitor_thread.setDaemon(0)
+        monitor_thread.start()
 
-    def set_work_thread(self):
-        self.set_process_data()
+    def save_work(self):
+        saving_thread = threading.Thread(target=self.save_monitor_data)
+        saving_thread.setDaemon(0)
+        saving_thread.start()
 
     def write_document(self):
+        self.AnalysisManager.create_database()
+
         if self.csv:
-            self.ReportManager.create_csv()
+            self.DocumentManager.create_csv()
         
         if self.report:
-            self.ReportManager.create_xl()
+            self.DocumentManager.create_xl()
 
-    def checked_limit_time(self):
-        if time.time() - self.start_time >= self.limit_time:
-            return True 
-        else:
-            return False
+    def delete_dump(self):
+        os.remove("{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d")))
     
     @_check_times
-    def working(self):
+    def process_monitoring(self):
         global collect_data
         global thread_count
 
@@ -446,8 +530,7 @@ class Secretary:
         for self.target in self.targets:
             try:
                 self.ProcessManager = ProcessManager(self.target)
-                
-                self.get_work_thread()
+                self.monitor_work()
 
             except psutil.NoSuchProcess:
                 print "terminated target process"
@@ -458,7 +541,7 @@ class Secretary:
                 self.debug()
             if thread_count == self.target_count or waiting_count >= 10: 
                 self.process_data = collect_data
-                self.set_work_thread()
+                self.save_work()
                 thread_count = 0
                 collect_data = []
                 break
@@ -477,13 +560,17 @@ class Secretary:
 
     def start(self):
         while True:
-            self.working()
+            self.process_monitoring()
 
             if self.checked_limit_time():
                 break
         
+        self.CollectManager.dump()
+
         if self.report or self.csv:
             self.write_document()
+
+        self.delete_dump()
         
         print "Complete collecting process data"
         print "loop count: {}, start time: {}, end time: {}".format(self.loop, 
@@ -506,6 +593,7 @@ def main():
     secretary = Secretary(args.path, args.interval, args.time, args.debug, args.report, args.csv)
     
     secretary.start()
+
 
 if __name__=="__main__":
 	main()

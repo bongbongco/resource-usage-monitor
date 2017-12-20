@@ -204,7 +204,7 @@ class DatabaseManager(SingletonInstane):
     def _connect_process_data(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            self.connect = sqlite3.connect(self.database_name, isolation_level = None)
+            self.connect = sqlite3.connect("{}".format(self.database_name), isolation_level = None)
             self.cursor = self.connect.cursor()
             return func(self, *args, **kwargs)
         return wrapper
@@ -307,7 +307,6 @@ class DatabaseManager(SingletonInstane):
         self.monitor_time = unstructured_data["monitor_time"]
 
     def working(self, data):
-        self.checked_database()
         for unstructured_row in data:
             self.classify(unstructured_row)
             self.set_process_data()
@@ -328,7 +327,7 @@ class ProcessManager:
         self.name = self.process.name()
 
     def get_cpu_percent(self):
-        self.cpu_percent = self.process.cpu_percent()
+        self.cpu_percent = self.process.cpu_percent(interval=0.1)
 
     def get_cpu_times(self):
         self.cpu_times = self.process.cpu_times()
@@ -402,16 +401,25 @@ class Secretary:
         global collect_data
         global thread_count 
 
-        self.process_data = self.ProcessManager.working()
-        self.process_data.update({"loop":self.loop})
-        self.process_data.update({"monitor_time":time.strftime("%Y-%m-%d %H:%M:%S")})
+        process_data = self.ProcessManager.working()
+        process_data.update({"loop":"{}".format(self.loop)})
+        process_data.update({"monitor_time":"{}".format(time.strftime("%Y-%m-%d %H:%M:%S"))})
+
         self.lock.acquire()
-        collect_data.append(self.process_data)
+        collect_data.append(process_data)
         thread_count = thread_count + 1 
         self.lock.release()
 
     def set_process_data(self):
         self.DatabaseManager.working(self.process_data)
+
+    def get_work_thread(self):
+        get_data_thread = threading.Thread(target=self.get_process_data)
+        get_data_thread.setDaemon(0)
+        get_data_thread.start()
+
+    def set_work_thread(self):
+        self.set_process_data()
 
     def write_document(self):
         if self.csv:
@@ -430,6 +438,7 @@ class Secretary:
     def working(self):
         global collect_data
         global thread_count
+
         waiting_count = 0
 
         self.get_processes()
@@ -438,9 +447,7 @@ class Secretary:
             try:
                 self.ProcessManager = ProcessManager(self.target)
                 
-                get_thread = threading.Thread(target=self.get_process_data)
-                get_thread.setDaemon(0)
-                get_thread.start()
+                self.get_work_thread()
 
             except psutil.NoSuchProcess:
                 print "terminated target process"
@@ -451,20 +458,22 @@ class Secretary:
                 self.debug()
             if thread_count == self.target_count or waiting_count >= 10: 
                 self.process_data = collect_data
-                self.set_process_data()
+                self.set_work_thread()
                 thread_count = 0
                 collect_data = []
                 break
             else:
                 waiting_count = waiting_count + 1
-                time.sleep(0.2)
+                time.sleep(0.1)
                 continue
 
     def debug(self):
+        global collect_data
         print "loop: {}, total: {}, now: {}, time: {}".format(self.loop, 
                 self.target_count, 
                 thread_count,
                 time.strftime("%Y-%m-%d %H:%M:%S"))
+        print collect_data
 
     def start(self):
         while True:

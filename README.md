@@ -74,11 +74,11 @@
 - working : 프로세스 데이터 추출 로직 관리
 
 ### 5) Secretary
-- _check_times : 
-- checked_limit_time : 
-- get_processes : 
-- get_process_data : 
-- save_monitor_data : 
+- _check_interval_time : 수집 시간 간격 확인 
+- checked_limit_time : 수집 시간 확인
+- get_pids : 현재 시스템 내 동작 중인 프로세스들의 PID 목록 추출
+- get_process_data : 추출한 PID를 이용한 프로세스 데이터 추출
+- save_monitor_data : 추출한 프로세스 데이터 저장
 - monitor_work : 프로세스 데이터 추출 스레드 생성
 - save_work : 추출 데이터 저장 스레드 생성
 - write_document : CSV, Excel 파일 생성

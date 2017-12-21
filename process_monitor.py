@@ -7,6 +7,7 @@ import time
 import datetime
 import argparse
 import xlsxwriter
+import platform
 
 collect_data = []
 thread_count = 0
@@ -50,7 +51,9 @@ class DocumentManager:
         timestamp(UTC)\n"
 
         all_data = self.AnalysisManager.get_all_data()
-        csv_file = open("{}\\process_{}.csv".format(self.export_path, self.time), 'a')
+        csv_file = open("{}\\{}_process_{}.csv".format(self.export_path, 
+            platform.node(), 
+            self.time), 'a')
         
         for row in all_data:
             for index in range(1,13):
@@ -61,8 +64,11 @@ class DocumentManager:
         csv_file.close()
 
     def create_xl(self):
-        self.workbook = xlsxwriter.Workbook("{}\\summary_report_{}.xlsx".format(self.export_path, self.time))
-        self.worksheet = self.workbook.add_worksheet("Summary_{}".format(self.time))
+        self.workbook = xlsxwriter.Workbook("{}\\{}_summary_report_{}.xlsx".format(self.export_path, 
+            platform.node(),
+            self.time))
+        self.worksheet = self.workbook.add_worksheet("Summary_{}_{}".format(platform.node(), 
+            self.time))
 
         self.set_format()
 
@@ -193,8 +199,12 @@ class AnalysisManager(SingletonInstane):
     def __init__(self):
         global export_path
         self.export_path = export_path
-        self.dump_name = "{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d"))
-        self.database_name = "{}\\process_{}.db".format(self.export_path, time.strftime("%Y-%m-%d"))
+        self.dump_name = "{}\\{}_process_{}.sql".format(self.export_path, 
+                platform.node(), 
+                time.strftime("%Y-%m-%d"))
+        self.database_name = "{}\\{}_process_{}.db".format(self.export_path, 
+                platform.node(), 
+                time.strftime("%Y-%m-%d"))
 
         self.connect = None
         self.cursor = None
@@ -262,7 +272,9 @@ class CollectManager(SingletonInstane):
     def __init__(self):
         global export_path
         self.export_path = export_path
-        self.dump_name = "{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d"))
+        self.dump_name = "{}\\{}_process_{}.sql".format(self.export_path, 
+                platform.node(),
+                time.strftime("%Y-%m-%d"))
         self.connect = sqlite3.connect("{}".format(":memory:"), check_same_thread = False)
         self.cursor = self.connect.cursor()
 
@@ -405,7 +417,7 @@ class ProcessManager:
 
         try:
             self.io = self.process.io_counters()
-        except psutil.NosuchProcess:
+        except psutil.NoSuchProcess:
             print "terminated target process"
             thread_count = thread_count + 1
 
@@ -516,7 +528,9 @@ class Secretary:
             self.DocumentManager.create_xl()
 
     def delete_dump(self):
-        os.remove("{}\\process_{}.sql".format(self.export_path, time.strftime("%Y-%m-%d")))
+        os.remove("{}\\{}_process_{}.sql".format(self.export_path, 
+            platform.node(),
+            time.strftime("%Y-%m-%d")))
     
     @_check_times
     def process_monitoring(self):

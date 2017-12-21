@@ -470,7 +470,7 @@ class Secretary:
 
         self.AnalysisManager = AnalysisManager()
 
-    def _check_times(func):
+    def _check_interval_time(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             while True:
@@ -488,7 +488,7 @@ class Secretary:
         else:
             return False
 
-    def get_processes(self):
+    def get_pids(self):
         self.targets = psutil.pids()
         self.target_count = len(self.targets)
 
@@ -519,8 +519,6 @@ class Secretary:
         saving_thread.start()
 
     def write_document(self):
-        self.AnalysisManager.create_database()
-
         if self.csv:
             self.DocumentManager.create_csv()
         
@@ -532,14 +530,14 @@ class Secretary:
             platform.node(),
             time.strftime("%Y-%m-%d")))
     
-    @_check_times
+    @_check_interval_time
     def process_monitoring(self):
         global collect_data
         global thread_count
 
         waiting_count = 0
 
-        self.get_processes()
+        self.get_pids()
 
         for self.target in self.targets:
             try:
@@ -580,6 +578,7 @@ class Secretary:
                 break
         
         self.CollectManager.dump()
+        self.AnalysisManager.create_database()
 
         if self.report or self.csv:
             self.write_document()
@@ -605,7 +604,6 @@ def main():
     args = parser.parse_args()
     
     secretary = Secretary(args.path, args.interval, args.time, args.debug, args.report, args.csv)
-    
     secretary.start()
 
 

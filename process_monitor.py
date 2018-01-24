@@ -35,28 +35,26 @@ class DocumentManager:
         self.items = []
     
         self.time = time.strftime("%Y-%m-%d")
-        
+       
     def create_csv(self):
-        cell = "name,\
-        cpu_percent,\
-        cpu_user_times,\
-        cpu_system_times,\
-        memory,\
-        read_count,\
-        write_count,\
-        read_bytes,\
-        write_bytes,\
-        loop,\
-        monitor_time,\
-        timestamp(UTC)\n"
+        cell = "Process name,\
+CPU (%),\
+CPU (user/m),\
+CPU (system/m),\
+Memory (%),\
+Read,\
+Write,\
+Read (MB),\
+Write (MB),\
+Time\n"
 
-        all_data = self.AnalysisManager.get_all_data()
+        average_data = self.AnalysisManager.get_average_data()
         csv_file = open("{}\\{}_process_{}.csv".format(self.export_path, 
             platform.node(), 
             self.time), 'a')
         
-        for row in all_data:
-            for index in range(1,13):
+        for row in average_data:
+            for index in range(0,10):
                 cell = cell + str(row[index])+','
             cell = cell[:-1] + '\n'
             csv_file.write(cell)
@@ -243,6 +241,11 @@ class AnalysisManager(SingletonInstane):
             self.connect.close()
 
     @_connect_process_data
+    def get_average_data(self):
+        sql = "select grouping_loop.name, cast(avg(grouping_loop.c) as int) as rank, cast(max(grouping_loop.u_t)/60 as int), cast(max(grouping_loop.s_t)/60 as int), round(avg(grouping_loop.m),2), max(grouping_loop.r_c), max(grouping_loop.w_c), max(grouping_loop.r_b)/1048576, max(grouping_loop.w_b)/1048576, min(grouping_loop.m_t) from (select name,avg(cpu_percent) as c, sum(cpu_user_times) as u_t, sum(cpu_system_times) as s_t, sum(memory) as m,sum(read_count) as r_c, sum(write_count) as w_c, sum(read_bytes) as r_b, sum(write_bytes) as w_b, min(monitor_time) as m_t from process group by name, loop) as grouping_loop group by grouping_loop.name order by rank DESC;"
+        return self.execute(sql)
+
+    @_connect_process_data
     def get_write_count_rank(self):
         sql = "select distinct name from process order by write_count DESC Limit 15;"
         return self.execute(sql)
@@ -389,9 +392,9 @@ class ProcessManager:
         global thread_count
 
         try:
-            self.cpu_percent = self.process.cpu_percent(interval=0.1)
+            self.cpu_percent = self.process.cpu_percent(interval=0.1) / psutil.cpu_count()
         except psutil.NoSuchProcess:
-            print "terminated target process"
+            #print "terminated target process"
             thread_count = thread_count + 1
 
     def get_cpu_times(self):
@@ -400,7 +403,7 @@ class ProcessManager:
         try:
             self.cpu_times = self.process.cpu_times()
         except psutil.NoSuchProcess:
-            print "terminated target process"
+            #print "terminated target process"
             thread_count = thread_count + 1 
 
     def get_memory(self):
@@ -409,7 +412,7 @@ class ProcessManager:
         try:
             self.memory = self.process.memory_percent()
         except psutil.NoSuchProcess:
-            print "terminated target process"
+            #print "terminated target process"
             thread_count = thread_count + 1
 
     def get_disk_io(self):
@@ -418,11 +421,12 @@ class ProcessManager:
         try:
             self.io = self.process.io_counters()
         except psutil.NoSuchProcess:
-            print "terminated target process"
+            #print "terminated target process"
             thread_count = thread_count + 1
 
     def get_summary(self):
-        return {"name":self.name,
+        try:
+            return {"name":self.name,
                 "cpu_percent":self.cpu_percent,
                 "cpu_user_times":self.cpu_times[0],
                 "cpu_system_times":self.cpu_times[1],
@@ -431,6 +435,8 @@ class ProcessManager:
                 "write_count":self.io[1],
                 "read_bytes":self.io[2],
                 "write_bytes":self.io[3]}
+        except:
+            pass
 
     def working(self):
         self.get_name()
@@ -469,6 +475,8 @@ class Secretary:
         self.csv = csv
 
         self.AnalysisManager = AnalysisManager()
+
+        self.delete_prev_data()
 
     def _check_interval_time(func):
         @wraps(func)
@@ -529,7 +537,23 @@ class Secretary:
         os.remove("{}\\{}_process_{}.sql".format(self.export_path, 
             platform.node(),
             time.strftime("%Y-%m-%d")))
-    
+
+    def delete_database(self):
+        os.remove("{}\\{}_process_{}.db".format(self.export_path, 
+            platform.node(),
+            time.strftime("%Y-%m-%d")))
+
+    def delete_prev_data(self):
+        file_type_list =["sql","db","csv","xlsx"]
+        for file_type in file_type_list:
+            check_file_name = "{}\\{}_process_{}.{}".format(self.export_path, 
+                platform.node(),
+                time.strftime("%Y-%m-%d"),
+                file_type)
+            
+            if os.path.isfile(check_file_name):
+                os.remove(check_file_name)
+
     @_check_interval_time
     def process_monitoring(self):
         global collect_data
@@ -545,7 +569,7 @@ class Secretary:
                 self.monitor_work()
 
             except psutil.NoSuchProcess:
-                print "terminated target process"
+                #print "terminated target process"
                 thread_count = thread_count + 1
         
         while True: 
@@ -584,7 +608,10 @@ class Secretary:
             self.write_document()
 
         self.delete_dump()
-        
+
+        if not self.debug_mode:
+            self.delete_database()
+
         print "Complete collecting process data"
         print "loop count: {}, start time: {}, end time: {}".format(self.loop, 
                 datetime.datetime.fromtimestamp(self.start_time).strftime("%Y-%m-%d %H:%M:%S"),
@@ -598,7 +625,7 @@ def main():
     parser.add_argument("-i", "--interval", default=5, help="interval to collect data (sec)", type=int)
     parser.add_argument("-t", "--time", default=5, help="time to collect data (min)", type=int)
     parser.add_argument("-d", "--debug", default=0, help="debug mode (on: 1, off: 0)", type=int)
-    parser.add_argument("-r", "--report", default=1, help="create summary report", type=int)
+    parser.add_argument("-r", "--report", default=0, help="create summary report", type=int)
     parser.add_argument("-c", "--csv", default=1, help="create csv", type=int)
 
     args = parser.parse_args()
